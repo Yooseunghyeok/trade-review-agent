@@ -1,0 +1,35 @@
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+*.key
+*_private.txt
+litellm_config.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest-tmp/
+.venv/
+venv/
+
+# Runtime and generated artifacts
+data/
+logs/
+outputs/
+prompts/
+memory/
+tests/fixtures/runtime/
+*.log
+*.pid
+
+# IDE and agent-local state
+.claude/
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+

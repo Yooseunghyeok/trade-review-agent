@@ -1,0 +1,59 @@
+{
+  "episode_ids": [
+    "episode-0001"
+  ],
+  "evidence_ids": [
+    "ev-entry",
+    "ev-exit",
+    "ev-pnl",
+    "ev-fee",
+    "ev-features"
+  ],
+  "metrics": [
+    {
+      "evidence_id": "ev-entry",
+      "name": "entry_quantity",
+      "value": "1"
+    },
+    {
+      "evidence_id": "ev-exit",
+      "name": "exit_quantity",
+      "value": "1"
+    },
+    {
+      "evidence_id": "ev-pnl",
+      "name": "gross_realized_pnl",
+      "value": "10.000000000000000000"
+    },
+    {
+      "evidence_id": "ev-pnl",
+      "name": "calculated_net_pnl",
+      "value": "8.000000000000000000"
+    },
+    {
+      "evidence_id": "ev-fee",
+      "name": "fees",
+      "value": "2"
+    }
+  ],
+  "model_metadata": {
+    "model": "deterministic",
+    "provider": "offline-fixture"
+  },
+  "observations": [
+    {
+      "evidence_ids": [
+        "ev-features"
+      ],
+      "text": "Pre-trade context used 2 candle closes."
+    }
+  ],
+  "pattern_candidates": [
+    "offline-fixture-single-episode"
+  ],
+  "questions": [
+    "Was the setup rule documented before entry?"
+  ],
+  "run_id": "run_20260115T090000Z_abcdef123456",
+  "schema_version": "2.0"
+}

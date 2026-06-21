@@ -1,0 +1,59 @@
+{
+  "event_time": "2026-06-01T12:00:00+00:00",
+  "post_until": "2026-06-01T12:10:00+00:00",
+  "fills": [
+    {
+      "fill_id": "fill-1",
+      "order_id": "order-1",
+      "symbol": "BTCUSDT",
+      "side": "BUY",
+      "quantity": "1",
+      "price": "100",
+      "fee": "1",
+      "rebate": "0",
+      "funding": "0",
+      "filled_at": "2026-06-01T12:00:00+00:00"
+    },
+    {
+      "fill_id": "fill-2",
+      "order_id": "order-2",
+      "symbol": "BTCUSDT",
+      "side": "SELL",
+      "quantity": "1",
+      "price": "110",
+      "fee": "1",
+      "rebate": "0",
+      "funding": "0",
+      "filled_at": "2026-06-01T12:05:00+00:00"
+    }
+  ],
+  "candles": [
+    {
+      "timeframe": "5m",
+      "close_time": "2026-06-01T11:55:00+00:00",
+      "open": "99",
+      "high": "101",
+      "low": "98",
+      "close": "100",
+      "volume": "10"
+    },
+    {
+      "timeframe": "5m",
+      "close_time": "2026-06-01T12:00:00+00:00",
+      "open": "100",
+      "high": "102",
+      "low": "99",
+      "close": "101",
+      "volume": "11"
+    },
+    {
+      "timeframe": "5m",
+      "close_time": "2026-06-01T12:05:00+00:00",
+      "open": "101",
+      "high": "111",
+      "low": "100",
+      "close": "110",
+      "volume": "12"
+    }
+  ]
+}

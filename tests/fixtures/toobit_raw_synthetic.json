@@ -1,0 +1,44 @@
+{
+  "created_at": "2026-01-15T09:10:00+00:00",
+  "mode": "read-only-synthetic-fixture",
+  "successful_endpoint": "/api/v1/futures/userTrades",
+  "attempts": [
+    {
+      "endpoint": "/api/v1/futures/userTrades",
+      "status": 200,
+      "ok": true,
+      "response": [
+        {
+          "time": "1768467900000",
+          "id": "synthetic-fill-close",
+          "orderId": "synthetic-order-close",
+          "symbol": "BTC-SWAP-USDT",
+          "price": "90",
+          "qty": "1000",
+          "commissionAsset": "USDT",
+          "commission": "1",
+          "makerRebate": "0.1",
+          "side": "BUY_CLOSE",
+          "realizedPnl": "10",
+          "ticketId": "synthetic-ticket-close",
+          "isMaker": false
+        },
+        {
+          "time": "1768467600000",
+          "id": "synthetic-fill-open",
+          "orderId": "synthetic-order-open",
+          "symbol": "BTC-SWAP-USDT",
+          "price": "100",
+          "qty": "1000",
+          "commissionAsset": "USDT",
+          "commission": "1",
+          "makerRebate": "0",
+          "side": "SELL_OPEN",
+          "realizedPnl": "0",
+          "ticketId": "synthetic-ticket-open",
+          "isMaker": true
+        }
+      ]
+    }
+  ]
+}

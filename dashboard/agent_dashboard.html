@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ICT Review Control Room</title>
+  <style>
+    :root { --bg:#090d12; --panel:#111821; --panel2:#17212c; --line:#263444; --text:#edf4fa; --muted:#8fa3b5; --blue:#55a7ff; --green:#4dd49a; --amber:#f0bd62; --red:#ff7474; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:radial-gradient(circle at 80% 0,#112338 0,transparent 34%),var(--bg); color:var(--text); font-family:"Segoe UI",sans-serif; }
+    button,input { font:inherit; }
+    header { height:66px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; padding:0 24px; background:#090d12d9; backdrop-filter:blur(12px); position:sticky; top:0; z-index:2; }
+    .brand { display:flex; align-items:center; gap:12px; font-weight:800; letter-spacing:.02em; }
+    .logo { width:32px; height:32px; border-radius:9px; background:linear-gradient(135deg,var(--blue),#775cff); display:grid; place-items:center; }
+    .online { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:13px; }
+    .dot { width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 12px var(--green); }
+    main { width:min(1440px,calc(100% - 32px)); margin:22px auto 40px; display:grid; grid-template-columns:minmax(0,1.55fr) minmax(320px,.75fr); gap:16px; }
+    .stack { display:grid; gap:16px; align-content:start; }
+    .panel { background:linear-gradient(145deg,#121a24,#0f161e); border:1px solid var(--line); border-radius:14px; overflow:hidden; box-shadow:0 16px 45px #0005; }
+    .panel-head { padding:15px 17px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; }
+    .panel-head h2 { margin:0; font-size:14px; }
+    .small { color:var(--muted); font-size:12px; }
+    .metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+    .metric { padding:16px; border:1px solid var(--line); border-radius:12px; background:var(--panel); }
+    .metric .value { font-size:22px; font-weight:800; margin:7px 0 2px; }
+    .badge { display:inline-flex; align-items:center; border-radius:999px; padding:4px 9px; font-size:11px; font-weight:800; background:#233142; color:var(--muted); }
+    .badge.ok { background:#123326; color:var(--green); }.badge.warn { background:#392b14; color:var(--amber); }.badge.bad { background:#3a1c21; color:var(--red); }
+    .actions { padding:16px; display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+    button { border:1px solid var(--line); color:var(--text); background:var(--panel2); border-radius:9px; padding:11px 12px; cursor:pointer; font-weight:700; }
+    button:hover { border-color:var(--blue); transform:translateY(-1px); } button.primary { background:linear-gradient(135deg,#277ed8,#6658d9); border:0; }
+    button:disabled { opacity:.45; cursor:wait; transform:none; }
+    .agent-launch { padding:18px; display:grid; grid-template-columns:1fr auto; gap:18px; align-items:center; }
+    .agent-launch p { margin:6px 0 0; color:var(--muted); font-size:13px; line-height:1.55; }
+    pre { margin:0; padding:15px; height:230px; overflow:auto; background:#090e14; color:#b7c8d8; font:12px/1.55 Consolas,monospace; white-space:pre-wrap; }
+    .list { padding:5px 16px 13px; }
+    .row { padding:11px 0; border-bottom:1px solid #202c39; display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; }
+    .row:last-child { border:0; }.row strong { display:block; font-size:13px; }.row span { color:var(--muted); font-size:11px; }
+    .review { padding:16px; max-height:320px; overflow:auto; color:#bac8d4; font-size:13px; line-height:1.65; white-space:pre-wrap; }
+    .empty { color:var(--muted); padding:18px; font-size:13px; }
+    @media(max-width:950px){ main{grid-template-columns:1fr}.metrics{grid-template-columns:1fr}.actions{grid-template-columns:1fr} }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand"><div class="logo">◆</div><div>ICT REVIEW <span class="small">CONTROL ROOM</span></div></div>
+    <div class="online"><span class="dot"></span><span id="clock">로컬 연결 중</span></div>
+  </header>
+  <main>
+    <div class="stack">
+      <section class="metrics">
+        <div class="metric"><div class="small">오늘 복기</div><div class="value" id="reviewStatus">—</div><span class="badge" id="reviewBadge">확인 중</span></div>
+        <div class="metric"><div class="small">Hermes Gateway</div><div class="value" id="gatewayStatus">—</div><span class="small" id="gatewayTime"></span></div>
+        <div class="metric"><div class="small">LiteLLM 모델 연결</div><div class="value" id="proxyStatus">—</div><span class="small">Vertex AI 로컬 프록시</span></div>
+        <div class="metric"><div class="small">학습 메모리</div><div class="value" id="patternCount">—</div><span class="small" id="candidateCount"></span></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>빠른 실행</h2><span class="small">주문 기능 없음 · 읽기/복기 전용</span></div>
+        <div class="actions">
+          <button class="primary action" data-action="review">오늘 복기 실행</button>
+          <button class="action" data-action="gateway">Gateway 시작/복구</button>
+          <button class="action" data-action="test">시스템 테스트</button>
+        </div>
+        <div class="small" style="padding:0 16px 16px">시스템 테스트는 거래소나 모델을 호출하지 않고 프로젝트 코드의 자동 검사를 실행합니다.</div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>실제 Agent 채팅</h2><span class="badge" id="agentUiState">시작 중</span></div>
+        <div class="agent-launch"><div><strong>Hermes 공식 대시보드</strong><p><b>Control Room</b>은 매매 복기 전용 상태판입니다. <b>Hermes Dashboard</b>는 Vertex AI와 실제로 대화하고 세션·도구 실행 과정을 보는 범용 Agent 콘솔입니다. 설정/API Keys 화면은 연결 관리용이므로 필요한 경우가 아니면 변경하지 마세요.</p></div><button class="primary" id="openAgent">실제 Agent 채팅 열기</button></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>실행 로그</h2><span class="badge" id="jobState">대기</span></div>
+        <pre id="jobLog">아직 실행한 작업이 없습니다.</pre>
+      </section>
+    </div>
+
+    <aside class="stack">
+      <section class="panel"><div class="panel-head"><h2>예약 작업</h2><span class="small">Hermes cron</span></div><div class="list" id="cronList"></div></section>
+      <section class="panel"><div class="panel-head"><h2>학습 패턴</h2><span class="small">확정 / 확인 대기</span></div><div class="list" id="patternList"></div></section>
+      <section class="panel"><div class="panel-head"><h2>최근 복기</h2><span class="small" id="latestReviewDate"></span></div><div class="review" id="latestReview">복기 결과가 없습니다.</div></section>
+    </aside>
+  </main>
+  <script>
+    const TOKEN='__ICT_UI_TOKEN__';
+    const $=id=>document.getElementById(id);
+    const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    function badge(el,text,kind=''){ el.textContent=text; el.className='badge '+kind; }
+    async function post(path,payload){ const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-ICT-UI-Token':TOKEN},body:JSON.stringify(payload)}); const data=await r.json(); if(!r.ok) throw new Error(data.error||'요청 실패'); return data; }
+    function displayTime(value){ if(!value)return '기록 없음'; try{return new Date(value).toLocaleString('ko-KR')}catch{return value} }
+    async function refresh(){
+      try{
+        const s=await fetch('/api/state',{cache:'no-store'}).then(r=>r.json());
+        $('clock').textContent=new Date(s.now).toLocaleString('ko-KR');
+        const status=s.today_review.latest_status||'MISSING'; $('reviewStatus').textContent=status;
+        badge($('reviewBadge'),status==='PUBLISHED'?'완료':status==='MISSING'?'실행 필요':'진행 확인',status==='PUBLISHED'?'ok':status==='MISSING'?'warn':'bad');
+        $('gatewayStatus').textContent=s.gateway.label; $('gatewayStatus').style.color=s.gateway.running?'var(--green)':'var(--red)'; $('gatewayTime').textContent='마지막 활동 '+displayTime(s.gateway.last_activity);
+        $('proxyStatus').textContent=s.litellm.label; $('proxyStatus').style.color=s.litellm.running?'var(--green)':'var(--amber)';
+        badge($('agentUiState'),s.hermes_ui.healthy?'사용 가능':s.hermes_ui.label,s.hermes_ui.healthy?'ok':'warn');
+        $('patternCount').textContent=s.patterns.confirmed.length+'개 확정'; $('candidateCount').textContent='확인 대기 '+s.patterns.candidates.length+'개';
+        $('cronList').innerHTML=s.cron.length?s.cron.map(j=>{const paused=!j.enabled;return `<div class="row"><div><strong>${esc(j.name)}</strong><span>최근 ${esc(displayTime(j.last_run_at))}<br>${paused?'V1 보관으로 실행 중지':'다음 '+esc(displayTime(j.next_run_at))}</span></div><span class="badge ${paused?'warn':j.last_status==='ok'?'ok':'warn'}">${paused?'중지됨':esc(j.last_status||'미실행')}</span></div>`}).join(''):'<div class="empty">등록된 작업 없음</div>';
+        const patterns=[...s.patterns.confirmed.map(p=>({...p,_kind:'ok',_label:'확정'})),...s.patterns.candidates.map(p=>({...p,_kind:'warn',_label:'대기'}))];
+        $('patternList').innerHTML=patterns.length?patterns.map(p=>`<div class="row"><div><strong>${esc(p.pattern_id)}</strong><span>${esc(p.user_answer||p.date||'')}</span></div><span class="badge ${p._kind}">${p._label}</span></div>`).join(''):'<div class="empty">학습 패턴 없음</div>';
+        $('latestReviewDate').textContent=s.latest_review?s.latest_review.date:''; $('latestReview').textContent=s.latest_review?s.latest_review.content:'복기 결과가 없습니다.';
+        const job=s.job; badge($('jobState'),job.running?'실행 중':job.returncode===0?'완료':job.returncode==null?'대기':'실패',job.running?'warn':job.returncode===0?'ok':job.returncode==null?'':'bad');
+        $('jobLog').textContent=job.log||'아직 실행한 작업이 없습니다.'; $('jobLog').scrollTop=$('jobLog').scrollHeight;
+        document.querySelectorAll('.action').forEach(b=>b.disabled=job.running);
+      }catch(e){ $('clock').textContent='연결 오류: '+e.message; }
+    }
+    document.querySelectorAll('.action').forEach(b=>b.addEventListener('click',async()=>{ const action=b.dataset.action; if(action==='review'&&!confirm('오늘 매매 데이터를 조회하고 Hermes 복기를 실행할까요?'))return; try{const d=await post('/api/action',{action});alert(d.message);refresh();}catch(e){alert(e.message);} }));
+    $('openAgent').addEventListener('click',()=>window.open('http://127.0.0.1:9119','_blank'));
+    refresh(); setInterval(refresh,2000);
+  </script>
+</body>
+</html>

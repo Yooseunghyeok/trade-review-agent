@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ICT Review Draft V2",
+  "type": "object",
+  "required": [
+    "run_id",
+    "episode_ids",
+    "metrics",
+    "observations",
+    "questions",
+    "pattern_candidates",
+    "evidence_ids",
+    "model_metadata",
+    "schema_version"
+  ],
+  "properties": {
+    "run_id": { "type": "string" },
+    "episode_ids": { "type": "array", "items": { "type": "string" } },
+    "metrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "value", "evidence_id"],
+        "properties": {
+          "name": { "type": "string" },
+          "value": {},
+          "evidence_id": { "type": "string" }
+        }
+      }
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["text", "evidence_ids"],
+        "properties": {
+          "text": { "type": "string" },
+          "evidence_ids": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "questions": { "type": "array", "items": { "type": "string" } },
+    "pattern_candidates": { "type": "array", "items": { "type": "string" } },
+    "evidence_ids": { "type": "array", "items": { "type": "string" } },
+    "model_metadata": { "type": "object" },
+    "schema_version": { "type": "string" }
+  }
+}

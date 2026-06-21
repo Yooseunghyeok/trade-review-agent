@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Confirmed Pattern Memory",
+  "type": "object",
+  "required": ["pattern_id", "status", "episode_id", "date", "evidence_id", "user_answer", "created_at", "schema_version"],
+  "properties": {
+    "pattern_id": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["CANDIDATE", "CONFIRMED"] },
+    "episode_id": { "type": "string", "minLength": 1 },
+    "date": { "type": "string", "format": "date" },
+    "evidence_id": { "type": "string", "minLength": 1 },
+    "user_answer": { "type": "string" },
+    "created_at": { "type": "string" },
+    "confirmed_at": { "type": ["string", "null"] },
+    "schema_version": { "type": "string" }
+  },
+  "additionalProperties": false
+}
