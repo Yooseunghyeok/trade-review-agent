@@ -1,16 +1,24 @@
 import os
+import shutil
 import subprocess
 import uuid
 from pathlib import Path
 
+import pytest
+
 
 PROJECT_ROOT = Path.cwd()
+requires_powershell = pytest.mark.skipif(
+    shutil.which("powershell") is None,
+    reason="requires PowerShell (Windows only)",
+)
 
 
 def run_powershell(args, *, env=None):
     return subprocess.run(["powershell", "-ExecutionPolicy", "Bypass", *args], cwd=PROJECT_ROOT, text=True, capture_output=True, timeout=60, env=env)
 
 
+@requires_powershell
 def test_bootstrap_dry_run_does_not_print_secrets():
     result = run_powershell([
         "-File",
@@ -27,6 +35,7 @@ def test_bootstrap_dry_run_does_not_print_secrets():
     assert "TOOBIT_ACCESS" not in combined
 
 
+@requires_powershell
 def test_bootstrap_lock_prevents_duplicate_run():
     root = PROJECT_ROOT / "tests" / "fixtures" / "runtime" / f"lock-{uuid.uuid4().hex}"
     lock_dir = root / "data" / "locks"
@@ -53,6 +62,7 @@ def test_bootstrap_lock_prevents_duplicate_run():
     assert "LOCK_HELD" in combined
 
 
+@requires_powershell
 def test_bootstrap_dry_run_stops_when_python_import_fails():
     root = PROJECT_ROOT / "tests" / "fixtures" / "runtime" / f"missing-src-{uuid.uuid4().hex}"
     root.mkdir(parents=True)
@@ -75,6 +85,7 @@ def test_bootstrap_dry_run_stops_when_python_import_fails():
     assert "DRY_RUN Hermes one-shot" not in combined
 
 
+@requires_powershell
 def test_install_script_dry_run():
     result = run_powershell(["-File", "scripts/install_daily_review_agent.ps1", "-DryRun"])
 
