@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -74,7 +75,15 @@ def _episode_to_evidence(episode: Any) -> dict[str, Any]:
     }
 
 
-def run_offline(fixture_path: Path, *, data_root: Path = Path("data"), run_id: str | None = None) -> Path:
+def run_offline(
+    fixture_path: Path,
+    *,
+    data_root: Path = Path("data"),
+    run_id: str | None = None,
+    use_llm: bool = False,
+    llm_base_url: str = "http://127.0.0.1:4000",
+    llm_model: str = "vertex-gemini-flash",
+) -> Path:
     fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
     actual_run_id = run_id or generate_run_id()
     manifest = create_manifest(actual_run_id, [build_input_file(fixture_path, "offline_fixture")])
@@ -111,28 +120,50 @@ def run_offline(fixture_path: Path, *, data_root: Path = Path("data"), run_id: s
 
         first_episode = episodes[0]
         evidence_ids = ["ev-entry", "ev-exit", "ev-pnl", "ev-fee", "ev-features"]
-        review_draft = {
-            "run_id": actual_run_id,
-            "episode_ids": [episode.episode_id for episode in episodes],
-            "metrics": [
-                {"name": "entry_quantity", "value": str(first_episode.entry_quantity), "evidence_id": "ev-entry"},
-                {"name": "exit_quantity", "value": str(first_episode.exit_quantity), "evidence_id": "ev-exit"},
-                {"name": "gross_realized_pnl", "value": str(first_episode.gross_realized_pnl), "evidence_id": "ev-pnl"},
-                {"name": "calculated_net_pnl", "value": str(first_episode.calculated_net_pnl), "evidence_id": "ev-pnl"},
-                {"name": "fees", "value": str(first_episode.fees), "evidence_id": "ev-fee"},
-            ],
-            "observations": [
-                {
-                    "text": f"Pre-trade context used {len(split.pre_trade)} candle closes.",
-                    "evidence_ids": ["ev-features"],
-                }
-            ],
-            "questions": ["Was the setup rule documented before entry?"],
-            "pattern_candidates": ["offline-fixture-single-episode"],
-            "evidence_ids": evidence_ids,
-            "model_metadata": {"provider": "offline-fixture", "model": "deterministic"},
-            "schema_version": "2.0",
-        }
+
+        if use_llm:
+            from ict_review.llm.llm_client import call_llm
+            draft_obj = call_llm(
+                actual_run_id,
+                first_episode,
+                features,
+                base_url=llm_base_url,
+                model=llm_model,
+            )
+            review_draft = {
+                "run_id": draft_obj.run_id,
+                "schema_version": draft_obj.schema_version,
+                "episode_ids": list(draft_obj.episode_ids),
+                "evidence_ids": list(draft_obj.evidence_ids),
+                "metrics": [{"name": m.name, "value": m.value, "evidence_id": m.evidence_id} for m in draft_obj.metrics],
+                "observations": [{"text": o.text, "evidence_ids": list(o.evidence_ids)} for o in draft_obj.observations],
+                "questions": list(draft_obj.questions),
+                "pattern_candidates": list(draft_obj.pattern_candidates),
+                "model_metadata": draft_obj.model_metadata,
+            }
+        else:
+            review_draft = {
+                "run_id": actual_run_id,
+                "episode_ids": [episode.episode_id for episode in episodes],
+                "metrics": [
+                    {"name": "entry_quantity", "value": str(first_episode.entry_quantity), "evidence_id": "ev-entry"},
+                    {"name": "exit_quantity", "value": str(first_episode.exit_quantity), "evidence_id": "ev-exit"},
+                    {"name": "gross_realized_pnl", "value": str(first_episode.gross_realized_pnl), "evidence_id": "ev-pnl"},
+                    {"name": "calculated_net_pnl", "value": str(first_episode.calculated_net_pnl), "evidence_id": "ev-pnl"},
+                    {"name": "fees", "value": str(first_episode.fees), "evidence_id": "ev-fee"},
+                ],
+                "observations": [
+                    {
+                        "text": f"Pre-trade context used {len(split.pre_trade)} candle closes.",
+                        "evidence_ids": ["ev-features"],
+                    }
+                ],
+                "questions": ["Was the setup rule documented before entry?"],
+                "pattern_candidates": ["offline-fixture-single-episode"],
+                "evidence_ids": evidence_ids,
+                "model_metadata": {"provider": "offline-fixture", "model": "deterministic"},
+                "schema_version": "2.0",
+            }
         draft_path = run_dir / "review_draft.json"
         _write_json(draft_path, review_draft)
         manifest = add_outputs(manifest, [build_output_file(draft_path, "structured_review_draft")], RunStatus.NARRATED)
@@ -163,9 +194,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fixture", required=True)
     parser.add_argument("--data-root", default="data")
     parser.add_argument("--run-id")
+    parser.add_argument("--llm", action="store_true", help="Call LiteLLM proxy for AI-generated review (requires proxy at LITELLM_BASE_URL).")
+    parser.add_argument("--llm-base-url", default=os.getenv("LITELLM_BASE_URL", "http://127.0.0.1:4000"))
+    parser.add_argument("--llm-model", default=os.getenv("LITELLM_MODEL", "vertex-gemini-flash"))
     args = parser.parse_args(argv)
 
-    run_dir = run_offline(Path(args.fixture), data_root=Path(args.data_root), run_id=args.run_id)
+    run_dir = run_offline(
+        Path(args.fixture),
+        data_root=Path(args.data_root),
+        run_id=args.run_id,
+        use_llm=args.llm,
+        llm_base_url=args.llm_base_url,
+        llm_model=args.llm_model,
+    )
     print(run_dir)
     return 0
 

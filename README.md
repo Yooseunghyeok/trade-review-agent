@@ -40,10 +40,54 @@ flowchart LR
 
 ---
 
+## MCP Agent 흐름
+
+`src/ict_review/mcp_server.py`는 파이프라인 전체를 **MCP 도구**로 노출합니다.
+Claude Desktop, Hermes 등 MCP 호환 에이전트가 다음 순서로 도구를 호출합니다.
+
+```mermaid
+sequenceDiagram
+    participant Agent as LLM Agent
+    participant MCP as MCP Server
+
+    Agent->>MCP: run_offline_review(fixture_path)
+    MCP-->>Agent: run_id + episode 요약
+
+    Agent->>MCP: get_confirmed_patterns()
+    MCP-->>Agent: 확정된 과거 패턴 목록
+
+    Agent->>MCP: get_trade_episodes(run_id)
+    MCP-->>Agent: episode 상세 + ground truth 수치
+
+    Note over Agent: 복기 초안(ReviewDraft) 작성
+    Agent->>MCP: validate_review_draft(run_id, draft_json)
+    MCP-->>Agent: passed=true / issues 목록
+
+    Agent->>MCP: finalize_review(run_id, draft_json)
+    MCP-->>Agent: 저장 경로 + Markdown 미리보기
+
+    Agent->>MCP: save_pattern_candidate(pattern_id, ...)
+    MCP-->>Agent: CANDIDATE 저장 확인
+```
+
+### MCP 서버 연결 방법
+
+```bash
+# Claude Desktop: claude_desktop_config.example.json 참고
+# 예시 (프로젝트 루트에서)
+python -m ict_review.mcp_server
+```
+
+`claude_desktop_config.example.json`을 `~/Library/Application Support/Claude/claude_desktop_config.json` (Mac) 또는 `%APPDATA%\Claude\claude_desktop_config.json` (Windows)에 복사 후 경로를 수정하세요.
+
+---
+
 ## 주요 기능
 
 | 모듈 | 역할 |
 |---|---|
+| `mcp_server` | 파이프라인 전체를 MCP 도구 6개로 노출 (Agent loop 진입점) |
+| `llm/llm_client` | LiteLLM 프록시 경유 ReviewDraft 생성 (HTTP 429 재시도 포함) |
 | `ledger/normalize_fills` | 거래소 응답을 내부 `Fill` 모델로 정규화 |
 | `ledger/episode_builder` | 체결을 포지션 에피소드로 복원하고 gross/net PnL 계산 |
 | `ledger/position_engine` | 체결 유효성 검증 및 포지션 전환 감지 |
@@ -134,7 +178,7 @@ pytest -q
 
 | 구분 | 수 |
 |---|---|
-| 통과 | 69개 |
+| 통과 | 80개 |
 | 건너뜀 | 4개 (PowerShell 미설치 환경) |
 | 실패 | 0개 |
 
@@ -168,11 +212,11 @@ pytest -q
 
 ## 향후 개선 방향
 
-- LLM 연동 경로의 오프라인 mock 테스트 추가
 - 헤지 모드 및 복합 심볼 지원 검토
 - evidence validator의 JSON Schema 기반 강화
 - 패턴 메모리 확인 UI 프로토타입
 - 다중 거래소 어댑터 추가
+- MCP 도구 단위 테스트 추가
 
 ---
 
