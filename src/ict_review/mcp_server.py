@@ -29,10 +29,10 @@ from ict_review.validation.evidence_validator import validate_review_draft as _v
 mcp = FastMCP(
     "trade-review-agent",
     instructions=(
-        "매매 복기 에이전트입니다. "
-        "run_offline_review로 파이프라인을 실행하고, "
-        "get_trade_episodes로 계산 결과를 확인하고, "
-        "validate_review_draft로 복기 초안을 검증하세요. "
+        "매매 복기 에이전트입니다. 권장 순서: "
+        "1) run_offline_review → 2) get_confirmed_patterns → 3) get_trade_episodes → "
+        "4) query_knowledge(ICT 개념 필요시) → 5) analyze_ict_checklist → 6) analyze_risk → "
+        "7) validate_review_draft → 8) finalize_review → 9) save_pattern_candidate. "
         "수치는 항상 get_trade_episodes에서 반환된 값을 그대로 사용하고 절대 반올림하지 마세요."
     ),
 )
@@ -310,6 +310,197 @@ def save_pattern_candidate(
         "ok": True,
         "saved": candidate.to_dict(),
         "note": "CANDIDATE 상태입니다. 사용자가 직접 confirm해야 다음 복기에 반영됩니다.",
+    })
+
+
+# ── 도구 7 ──────────────────────────────────────────────────────────────────
+
+_KNOWLEDGE_DIR = _ROOT / "docs" / "knowledge"
+
+
+@mcp.tool()
+def query_knowledge(topic: str) -> str:
+    """
+    ICT 매매 개념 문서에서 topic과 관련된 내용을 검색합니다.
+    FVG, Order Block, MSS, Liquidity Sweep, Premium/Discount 등 ICT 개념을 복기에 활용하세요.
+    사용 시점: analyze_ict_checklist 전에 관련 개념을 확인할 때 호출하세요.
+
+    Args:
+        topic: 검색할 키워드 (예: "FVG", "Order Block", "진입 체크리스트")
+    """
+    if not _KNOWLEDGE_DIR.exists():
+        return _dump({"error": "docs/knowledge 디렉터리가 없습니다."})
+
+    keywords = [kw.strip().lower() for kw in topic.replace(",", " ").split() if kw.strip()]
+    results: list[dict] = []
+
+    for md_file in sorted(_KNOWLEDGE_DIR.glob("*.md")):
+        content = md_file.read_text(encoding="utf-8")
+        matched_sections: list[str] = []
+        current_section = ""
+        for line in content.splitlines():
+            if line.startswith("#"):
+                if current_section and any(kw in current_section.lower() for kw in keywords):
+                    matched_sections.append(current_section.strip())
+                current_section = line + "\n"
+            else:
+                current_section += line + "\n"
+        if current_section and any(kw in current_section.lower() for kw in keywords):
+            matched_sections.append(current_section.strip())
+
+        if matched_sections:
+            results.append({"file": md_file.name, "sections": matched_sections})
+
+    if not results:
+        all_files = [f.name for f in sorted(_KNOWLEDGE_DIR.glob("*.md"))]
+        return _dump({
+            "found": False,
+            "topic": topic,
+            "hint": f"'{topic}'에 해당하는 섹션을 찾지 못했습니다. 전체 파일: {all_files}",
+        })
+
+    return _dump({"found": True, "topic": topic, "results": results})
+
+
+# ── 도구 8 ──────────────────────────────────────────────────────────────────
+
+@mcp.tool()
+def analyze_ict_checklist(run_id: str) -> str:
+    """
+    에피소드 데이터를 바탕으로 ICT 진입 체크리스트 항목별 확인 질문을 생성합니다.
+    수치 계산은 Python이 하고, LLM은 이 질문들을 복기 관찰에 반영하세요.
+    사용 시점: get_trade_episodes 조회 후, 복기 초안 작성 전에 호출하세요.
+    """
+    run_dir = _DATA_ROOT / "runs" / run_id
+    episodes_path = run_dir / "episodes.json"
+    features_path = run_dir / "features.json"
+
+    if not episodes_path.exists():
+        return _dump({"error": f"run_id '{run_id}' 를 찾을 수 없습니다."})
+
+    episodes = json.loads(episodes_path.read_text(encoding="utf-8"))
+    features = json.loads(features_path.read_text(encoding="utf-8")) if features_path.exists() else {}
+
+    checklist_items = []
+    for ep in episodes:
+        direction = ep.get("direction", "UNKNOWN")
+        entry_vwap = Decimal(str(ep.get("entry_vwap", "0")))
+        exit_vwap_raw = ep.get("exit_vwap")
+        exit_vwap = Decimal(str(exit_vwap_raw)) if exit_vwap_raw else None
+        pre_close_raw = features.get("pre_trade_last_close")
+        pre_close = Decimal(str(pre_close_raw)) if pre_close_raw else None
+
+        premium_discount = None
+        if pre_close and pre_close != 0:
+            if direction == "LONG":
+                premium_discount = "DISCOUNT" if entry_vwap < pre_close else "PREMIUM"
+            elif direction == "SHORT":
+                premium_discount = "PREMIUM" if entry_vwap > pre_close else "DISCOUNT"
+
+        checklist_items.append({
+            "episode_id": ep.get("episode_id"),
+            "direction": direction,
+            "entry_vwap": str(entry_vwap),
+            "pre_trade_last_close": str(pre_close) if pre_close else None,
+            "entry_zone": premium_discount,
+            "checklist_questions": [
+                f"[1] 상위 타임프레임 바이어스가 {direction} 방향과 일치했는가?",
+                "[2] 진입 전 유동성 스윕(Liquidity Sweep)이 발생했는가?",
+                "[3] 스윕 이후 Displacement(강한 이동)가 있었는가?",
+                "[4] Market Structure Shift(MSS)가 확인됐는가?",
+                f"[5] 진입 가격({entry_vwap})이 FVG 또는 Order Block 내에 있었는가?",
+                f"[6] 진입 구간이 {'Discount(저평가) 구간' if premium_discount == 'DISCOUNT' else 'Premium(고평가) 구간' if premium_discount == 'PREMIUM' else '불명 (pre-trade 데이터 부족)'}이었는가?",
+                "[7] 손절 위치가 사전에 정해졌는가? (미정이면 진입 근거 약함)",
+                "[8] 익절 목표가 반대편 유동성 또는 구조적 레벨에 설정됐는가?",
+                "[9] R:R이 최소 1:2 이상이었는가?",
+                "[10] 추가 컨플루언스(OB, 세션 오픈, HTF 레벨 등)가 있었는가?",
+            ],
+            "note": (
+                f"진입 구간이 {premium_discount}로 판단됩니다. "
+                f"{'LONG은 Discount 구간 진입이 ICT 원칙에 부합합니다.' if direction == 'LONG' and premium_discount == 'DISCOUNT' else ''}"
+                f"{'SHORT은 Premium 구간 진입이 ICT 원칙에 부합합니다.' if direction == 'SHORT' and premium_discount == 'PREMIUM' else ''}"
+                f"{'ICT 원칙과 반대 구간 진입입니다. 추가 근거가 필요합니다.' if (direction == 'LONG' and premium_discount == 'PREMIUM') or (direction == 'SHORT' and premium_discount == 'DISCOUNT') else ''}"
+            ) if premium_discount else "pre-trade 캔들 데이터가 부족해 Premium/Discount 판단 불가",
+        })
+
+    return _dump({
+        "run_id": run_id,
+        "analyst": "ict-technical",
+        "checklist": checklist_items,
+        "reference": "docs/knowledge/entry-checklist.md",
+    })
+
+
+# ── 도구 9 ──────────────────────────────────────────────────────────────────
+
+@mcp.tool()
+def analyze_risk(run_id: str) -> str:
+    """
+    에피소드의 수수료 비율, 손익 구조, 리스크 지표를 분석합니다.
+    수치 계산은 Python이 하고, LLM은 이 분석을 복기 관찰에 반영하세요.
+    사용 시점: get_trade_episodes 조회 후, 복기 초안 작성 전에 호출하세요.
+    """
+    run_dir = _DATA_ROOT / "runs" / run_id
+    episodes_path = run_dir / "episodes.json"
+
+    if not episodes_path.exists():
+        return _dump({"error": f"run_id '{run_id}' 를 찾을 수 없습니다."})
+
+    episodes = json.loads(episodes_path.read_text(encoding="utf-8"))
+    analyses = []
+
+    for ep in episodes:
+        gross = Decimal(str(ep.get("gross_realized_pnl", "0")))
+        net = Decimal(str(ep.get("calculated_net_pnl", "0")))
+        fees = Decimal(str(ep.get("fees", "0")))
+        entry_vwap = Decimal(str(ep.get("entry_vwap", "0")))
+        exit_vwap_raw = ep.get("exit_vwap")
+        exit_vwap = Decimal(str(exit_vwap_raw)) if exit_vwap_raw else None
+        qty = Decimal(str(ep.get("entry_quantity", "0")))
+        direction = ep.get("direction", "UNKNOWN")
+
+        fee_ratio = (fees / abs(gross) * 100) if gross != 0 else None
+        is_winner = net > 0
+        price_move = None
+        if exit_vwap and entry_vwap and entry_vwap != 0:
+            if direction == "LONG":
+                price_move = exit_vwap - entry_vwap
+            elif direction == "SHORT":
+                price_move = entry_vwap - exit_vwap
+
+        flags = []
+        if fee_ratio and fee_ratio > Decimal("30"):
+            flags.append(f"수수료가 gross PnL의 {fee_ratio:.1f}%입니다. 수수료 비중이 높습니다.")
+        if not is_winner and gross > 0:
+            flags.append("gross PnL은 양수지만 수수료로 인해 net PnL이 음수입니다.")
+        if price_move is not None and price_move < 0:
+            flags.append(f"가격이 {direction} 방향과 반대로 움직였습니다 ({price_move:+}).")
+
+        analyses.append({
+            "episode_id": ep.get("episode_id"),
+            "direction": direction,
+            "result": "WIN" if is_winner else "LOSS",
+            "gross_pnl": str(gross),
+            "net_pnl": str(net),
+            "fees": str(fees),
+            "fee_ratio_pct": f"{fee_ratio:.2f}" if fee_ratio is not None else None,
+            "price_move": str(price_move) if price_move is not None else None,
+            "flags": flags,
+            "missing_data": [
+                k for k, v in [
+                    ("stop_loss", None),
+                    ("take_profit", None),
+                    ("planned_rr", None),
+                ] if v is None
+            ],
+            "note": "손절/익절/계획 R:R 데이터가 fixture에 없습니다. 복기 질문으로 추가하세요.",
+        })
+
+    return _dump({
+        "run_id": run_id,
+        "analyst": "risk",
+        "analyses": analyses,
+        "evidence_ids": ["ev-pnl", "ev-fee"],
     })
 
 

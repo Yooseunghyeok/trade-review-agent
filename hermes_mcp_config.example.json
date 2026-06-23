@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "trade-review-agent": {
+      "command": "python",
+      "args": ["-m", "ict_review.mcp_server"],
+      "env": {
+        "PYTHONPATH": "/path/to/trade-review-agent/src"
+      }
+    }
+  }
+}

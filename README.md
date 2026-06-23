@@ -59,6 +59,15 @@ sequenceDiagram
     Agent->>MCP: get_trade_episodes(run_id)
     MCP-->>Agent: episode 상세 + ground truth 수치
 
+    Agent->>MCP: query_knowledge("FVG Order Block")
+    MCP-->>Agent: ICT 개념 문서 관련 섹션
+
+    Agent->>MCP: analyze_ict_checklist(run_id)
+    MCP-->>Agent: ICT 10개 체크리스트 질문 + 진입 구간 판단
+
+    Agent->>MCP: analyze_risk(run_id)
+    MCP-->>Agent: 수수료 비율, 손익 구조, 리스크 플래그
+
     Note over Agent: 복기 초안(ReviewDraft) 작성
     Agent->>MCP: validate_review_draft(run_id, draft_json)
     MCP-->>Agent: passed=true / issues 목록
@@ -86,7 +95,10 @@ python -m ict_review.mcp_server
 
 | 모듈 | 역할 |
 |---|---|
-| `mcp_server` | 파이프라인 전체를 MCP 도구 6개로 노출 (Agent loop 진입점) |
+| `mcp_server` | 파이프라인 전체를 MCP 도구 9개로 노출 (Agent loop 진입점) |
+| `mcp_server.query_knowledge` | ICT 개념 문서 검색 (FVG, OB, MSS 등) |
+| `mcp_server.analyze_ict_checklist` | ICT 10개 체크리스트 항목 + Premium/Discount 구간 판단 |
+| `mcp_server.analyze_risk` | 수수료 비율, 손익 구조, 리스크 플래그 계산 |
 | `llm/llm_client` | LiteLLM 프록시 경유 ReviewDraft 생성 (HTTP 429 재시도 포함) |
 | `ledger/normalize_fills` | 거래소 응답을 내부 `Fill` 모델로 정규화 |
 | `ledger/episode_builder` | 체결을 포지션 에피소드로 복원하고 gross/net PnL 계산 |
