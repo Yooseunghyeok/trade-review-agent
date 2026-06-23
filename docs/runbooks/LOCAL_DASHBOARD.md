@@ -1,5 +1,19 @@
 # Local Dashboard
 
+## 데모 모드 (API 키·실거래 데이터 불필요)
+
+synthetic 예제 데이터로 UI를 미리 볼 수 있습니다.
+
+```bash
+export PYTHONPATH=src
+python -m ict_review.ui.server --demo
+# → http://127.0.0.1:8765
+```
+
+외부 서비스(Hermes Gateway, LiteLLM)는 시작하지 않습니다.
+
+---
+
 외부 서버 없이 이 PC에서만 사용하는 운영 화면이다. 서버는 `127.0.0.1`에만 바인딩되며 컴퓨터 또는 실행 창을 끄면 함께 종료된다. Control Room이 Hermes Gateway와 공식 Agent UI 프로세스를 직접 관리한다.
 
 ## 실행

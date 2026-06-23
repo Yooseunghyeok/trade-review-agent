@@ -194,6 +194,62 @@ SERVICES = {
     ),
 }
 
+DEMO_MODE = False
+
+
+def _demo_state_payload() -> dict[str, Any]:
+    """Return synthetic state loaded from examples/ — no API keys or real data needed."""
+    review_md = (PROJECT_ROOT / "examples" / "synthetic_review.md").read_text(encoding="utf-8")
+    now = datetime.now(KST).isoformat(timespec="seconds")
+    today = datetime.now(KST).date().isoformat()
+    demo_service: dict[str, Any] = {
+        "running": False,
+        "label": "중지됨 (데모 모드)",
+        "started_at": None,
+        "last_exit": None,
+        "failures": 0,
+        "log": "[DEMO] 데모 모드에서는 외부 서비스가 실행되지 않습니다.\n",
+        "managed": False,
+    }
+    return {
+        "now": now,
+        "today": today,
+        "today_review": {
+            "date": "2026-01-15",
+            "latest_run_id": "run_20260115T090000Z_abcdef123456",
+            "latest_status": "VERIFIED",
+            "next_action": "패턴 확인 대기 중 (synthetic demo)",
+        },
+        "recent_days": [
+            {"date": "2026-01-15", "latest_run_id": "run_20260115T090000Z_abcdef123456", "latest_status": "VERIFIED"},
+        ],
+        "gateway": {**demo_service, "last_activity": None},
+        "hermes_ui": {**demo_service, "healthy": False},
+        "litellm": {**demo_service, "healthy": False},
+        "cron": [],
+        "patterns": {
+            "confirmed": [],
+            "candidates": [
+                {
+                    "pattern_id": "offline-fixture-single-episode",
+                    "status": "CANDIDATE",
+                    "episode_id": "episode-0001",
+                    "date": "2026-01-15",
+                    "evidence_id": "ev-pnl",
+                    "user_answer": "",
+                    "created_at": "2026-01-15T09:10:00Z",
+                    "schema_version": "2.0",
+                }
+            ],
+        },
+        "latest_review": {
+            "date": "2026-01-15",
+            "run_id": "run_20260115T090000Z_abcdef123456",
+            "content": review_md,
+        },
+        "job": {"running": False, "action": "", "started_at": None, "finished_at": None, "returncode": None, "log": ""},
+    }
+
 
 def launch_gateway() -> tuple[bool, str]:
     return SERVICES["gateway"].start(manual=True)
@@ -312,6 +368,8 @@ JOB = AgentJob()
 
 
 def state_payload() -> dict[str, Any]:
+    if DEMO_MODE:
+        return _demo_state_payload()
     daily = _daily_rows()
     today = datetime.now(KST).date().isoformat()
     today_row = next((row for row in daily if row.get("date") == today), None)
@@ -451,35 +509,43 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
 
 def main(argv: list[str] | None = None) -> int:
+    global DEMO_MODE
     parser = argparse.ArgumentParser(description="Run the local ICT review dashboard.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--demo", action="store_true", help="Use synthetic example data — no API keys or real data needed.")
     parser.add_argument("--smoke-test", action="store_true", help="start managed services, print health, then stop")
     args = parser.parse_args(argv)
     if args.host not in {"127.0.0.1", "localhost"}:
         parser.error("The dashboard is intentionally local-only; use 127.0.0.1 or localhost.")
+    DEMO_MODE = args.demo
     server = ThreadingHTTPServer((args.host, args.port), DashboardHandler)
     server.ui_token = secrets.token_urlsafe(24)  # type: ignore[attr-defined]
     url = f"http://{args.host}:{args.port}"
     print(f"ICT review dashboard: {url}", flush=True)
+    if DEMO_MODE:
+        print("[DEMO] synthetic 예제 데이터로 실행 중 — 외부 서비스 미시작", flush=True)
     print("종료: Ctrl+C", flush=True)
-    for service in SERVICES.values():
-        ok, message = service.start(manual=True)
-        print(message, flush=True)
+    if not DEMO_MODE:
+        for service in SERVICES.values():
+            ok, message = service.start(manual=True)
+            print(message, flush=True)
     stop_monitor = threading.Event()
 
     def monitor_services() -> None:
         while not stop_monitor.wait(5):
-            for service in SERVICES.values():
-                service.ensure()
+            if not DEMO_MODE:
+                for service in SERVICES.values():
+                    service.ensure()
 
     threading.Thread(target=monitor_services, daemon=True).start()
     if args.smoke_test:
-        for _ in range(30):
-            if _url_ok("http://127.0.0.1:9119"):
-                break
-            time.sleep(2)
+        if not DEMO_MODE:
+            for _ in range(30):
+                if _url_ok("http://127.0.0.1:9119"):
+                    break
+                time.sleep(2)
         result = state_payload()
         print(json.dumps({
             "gateway": result["gateway"],
@@ -487,8 +553,9 @@ def main(argv: list[str] | None = None) -> int:
             "litellm": result["litellm"],
         }, ensure_ascii=False, indent=2), flush=True)
         stop_monitor.set()
-        for service in SERVICES.values():
-            service.stop()
+        if not DEMO_MODE:
+            for service in SERVICES.values():
+                service.stop()
         server.server_close()
         return 0
     if not args.no_browser:
@@ -499,8 +566,9 @@ def main(argv: list[str] | None = None) -> int:
         pass
     finally:
         stop_monitor.set()
-        for service in SERVICES.values():
-            service.stop()
+        if not DEMO_MODE:
+            for service in SERVICES.values():
+                service.stop()
         server.server_close()
     return 0
 

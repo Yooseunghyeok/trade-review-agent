@@ -2,6 +2,8 @@
 
 거래 체결 원본을 읽어 Python 계산 결과를 ground truth로 삼는 **읽기 전용 거래 복기 파이프라인 프로토타입**입니다.
 
+<!-- 로컬에서 데모 실행 후 스크린샷을 이 위치에 추가하세요: ![dashboard demo](docs/dashboard-demo.png) -->
+
 ---
 
 ## 해결하려 한 문제
@@ -119,6 +121,28 @@ python -m ict_review.cli.review_offline \
 - 각 수치는 `ev-pnl`, `ev-fee` evidence ID로 추적 가능
 
 구조화된 출력 전체: [`examples/synthetic_review.json`](examples/synthetic_review.json)
+
+---
+
+## 로컬 대시보드 (데모 모드)
+
+> **API 키·실거래 데이터 없이** synthetic 예제로 UI를 미리 볼 수 있습니다.
+
+```bash
+# 의존성 설치 후
+export PYTHONPATH=src   # Windows: $env:PYTHONPATH = "src"
+
+python -m ict_review.ui.server --demo
+```
+
+브라우저가 자동으로 `http://127.0.0.1:8765` 를 엽니다. 열리지 않으면 직접 접속하세요.
+
+**데모 모드에서 보이는 것:**
+- synthetic_review.md 복기 내용
+- 패턴 메모리 후보 1건 (`offline-fixture-single-episode`)
+- 외부 서비스(Hermes, LiteLLM)는 "중지됨 (데모 모드)" 표시
+
+**스크린샷 저장하려면:** 대시보드 열린 상태에서 캡처 후 `docs/dashboard-demo.png`에 저장하고 README 상단 주석을 이미지 태그로 교체하면 됩니다.
 
 ---
 
