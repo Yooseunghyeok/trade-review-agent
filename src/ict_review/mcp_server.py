@@ -13,7 +13,7 @@ from mcp.server.fastmcp import FastMCP
 _ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_ROOT / "src"))
 
-from ict_review.features.asof import Candle, split_candles_asof
+from ict_review.features.asof import Candle, split_candles_asof, split_timeframes_asof
 from ict_review.ledger.episode_builder import build_trade_episodes
 from ict_review.ledger.normalize_fills import normalize_fills
 from ict_review.narrative.models import ReviewDraft
@@ -103,13 +103,31 @@ def run_offline_review(fixture_path: str = "examples/synthetic_input.json") -> s
 
     event_time = _parse_time(str(fixture["event_time"]))
     post_until = _parse_time(str(fixture["post_until"])) if fixture.get("post_until") else None
-    candles = [_parse_candle(r) for r in fixture["candles"]]
-    split = split_candles_asof(candles, event_time, post_until=post_until)
+    all_candles = [_parse_candle(r) for r in fixture["candles"]]
+
+    # 타임프레임별로 그룹화 후 멀티 타임프레임 분리
+    candles_by_tf: dict[str, list[Candle]] = {}
+    for c in all_candles:
+        candles_by_tf.setdefault(c.timeframe, []).append(c)
+
+    splits = split_timeframes_asof(candles_by_tf, event_time, post_until=post_until)
+    primary_tf = "5m" if "5m" in splits else (next(iter(splits), None))
+    primary_split = splits[primary_tf] if primary_tf else None
+
+    tf_features: dict[str, dict] = {
+        tf: {
+            "pre_trade_close_count": len(sp.pre_trade),
+            "post_trade_close_count": len(sp.post_trade),
+            "pre_trade_last_close": str(sp.pre_trade[-1].close) if sp.pre_trade else None,
+        }
+        for tf, sp in splits.items()
+    }
     features = {
         "event_time": event_time.isoformat(),
-        "pre_trade_close_count": len(split.pre_trade),
-        "post_trade_close_count": len(split.post_trade),
-        "pre_trade_last_close": split.pre_trade[-1].close if split.pre_trade else None,
+        "pre_trade_close_count": len(primary_split.pre_trade) if primary_split else 0,
+        "post_trade_close_count": len(primary_split.post_trade) if primary_split else 0,
+        "pre_trade_last_close": str(primary_split.pre_trade[-1].close) if primary_split and primary_split.pre_trade else None,
+        "timeframes": tf_features,
     }
 
     (run_dir / "episodes.json").write_text(_dump([e for e in episodes]), encoding="utf-8")
@@ -381,13 +399,20 @@ def analyze_ict_checklist(run_id: str) -> str:
     episodes = json.loads(episodes_path.read_text(encoding="utf-8"))
     features = json.loads(features_path.read_text(encoding="utf-8")) if features_path.exists() else {}
 
+    # 멀티 타임프레임 features 추출
+    tf_features: dict[str, dict] = features.get("timeframes", {})
+    # primary: 5m 우선, 없으면 첫 번째 타임프레임
+    primary_tf = "5m" if "5m" in tf_features else (next(iter(tf_features), None))
+    primary_features = tf_features.get(primary_tf, {}) if primary_tf else {}
+
     checklist_items = []
     for ep in episodes:
         direction = ep.get("direction", "UNKNOWN")
         entry_vwap = Decimal(str(ep.get("entry_vwap", "0")))
         exit_vwap_raw = ep.get("exit_vwap")
         exit_vwap = Decimal(str(exit_vwap_raw)) if exit_vwap_raw else None
-        pre_close_raw = features.get("pre_trade_last_close")
+        # 멀티 타임프레임 있으면 primary에서, 없으면 features 루트에서 legacy 호환
+        pre_close_raw = primary_features.get("pre_trade_last_close") or features.get("pre_trade_last_close")
         pre_close = Decimal(str(pre_close_raw)) if pre_close_raw else None
 
         premium_discount = None
@@ -397,12 +422,20 @@ def analyze_ict_checklist(run_id: str) -> str:
             elif direction == "SHORT":
                 premium_discount = "PREMIUM" if entry_vwap > pre_close else "DISCOUNT"
 
+        # 상위 타임프레임 컨텍스트 (있을 경우)
+        htf_context: dict[str, str] = {}
+        for tf in ("1h", "4h", "1d"):
+            tf_data = tf_features.get(tf, {})
+            if tf_data.get("pre_trade_last_close"):
+                htf_context[tf] = f"직전 종가: {tf_data['pre_trade_last_close']} (캔들 {tf_data.get('pre_trade_close_count', '?')}개)"
+
         checklist_items.append({
             "episode_id": ep.get("episode_id"),
             "direction": direction,
             "entry_vwap": str(entry_vwap),
             "pre_trade_last_close": str(pre_close) if pre_close else None,
             "entry_zone": premium_discount,
+            "higher_timeframe_context": htf_context,
             "checklist_questions": [
                 f"[1] 상위 타임프레임 바이어스가 {direction} 방향과 일치했는가?",
                 "[2] 진입 전 유동성 스윕(Liquidity Sweep)이 발생했는가?",

@@ -198,7 +198,7 @@ def test_prepare_fetches_read_only_snapshot_when_fixture_and_raw_are_missing(mon
     data_root = runtime_dir("daily-fetch") / "data"
     window_start_ms = daily_kst_window(date(2026, 6, 16)).start_ms
 
-    def fake_fetch(trading_date, *, output_path, project_root, symbol=None, interval="5m", limit=500):
+    def fake_fetch(trading_date, *, output_path, project_root, symbol=None, interval="5m", intervals=None, limit=500):
         output_path.parent.mkdir(parents=True)
         output_path.write_text(json.dumps({
             "mode": "read-only-daily-snapshot",
@@ -247,7 +247,7 @@ def test_prepare_filters_to_requested_kst_day_boundaries(monkeypatch):
     window = daily_kst_window(date(2026, 6, 15))
     next_day_start_ms = daily_kst_window(date(2026, 6, 16)).start_ms
 
-    def fake_fetch(trading_date, *, output_path, project_root, symbol=None, interval="5m", limit=500):
+    def fake_fetch(trading_date, *, output_path, project_root, symbol=None, interval="5m", intervals=None, limit=500):
         output_path.parent.mkdir(parents=True)
         output_path.write_text(json.dumps({
             "mode": "read-only-daily-snapshot",

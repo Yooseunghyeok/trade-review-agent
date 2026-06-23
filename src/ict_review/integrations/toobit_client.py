@@ -108,10 +108,13 @@ def fetch_toobit_daily_snapshot(
     project_root: Path,
     symbol: str | None = None,
     interval: str = "5m",
+    intervals: list[str] | None = None,
     limit: int = 500,
 ) -> Path:
     """Collect read-only Toobit fills and candles for one KST trading date.
 
+    Pass intervals=["5m","15m","1h"] to fetch multiple timeframes in one call.
+    Falls back to [interval] when intervals is None (backward compat).
     This function never prints credentials and never performs account mutation calls.
     """
     load_env_file(project_root / ".env")
@@ -149,20 +152,30 @@ def fetch_toobit_daily_snapshot(
     if not _rows(trade_response):
         raise ToobitClientError(f"Toobit userTrades returned no fills for {trading_date.isoformat()} KST")
 
-    candle_params = {
-        "symbol": actual_symbol,
-        "interval": interval,
-        "startTime": window.start_ms,
-        "endTime": window.end_ms_inclusive,
-        "limit": limit,
-    }
     candle_endpoint = "/quote/v1/klines"
-    candle_url = f"{base_url}{candle_endpoint}?{urlencode(candle_params)}"
-    candle_status, candle_response = _http_get(candle_url, {"User-Agent": "ict-trading-wiki-candle-fetch/0.1", "Accept": "application/json"})
-    if not (200 <= candle_status < 300):
-        raise ToobitClientError(f"Toobit klines failed with HTTP {candle_status}")
-    if not _rows(candle_response):
-        raise ToobitClientError(f"Toobit klines returned no candles for {trading_date.isoformat()} KST")
+    candle_headers = {"User-Agent": "ict-trading-wiki-candle-fetch/0.1", "Accept": "application/json"}
+    fetch_intervals = intervals if intervals is not None else [interval]
+
+    # 타임프레임별 캔들 수집
+    candles_by_interval: dict[str, dict] = {}
+    primary_candle_status, primary_candle_response = 0, []
+    for tf in fetch_intervals:
+        candle_params = {
+            "symbol": actual_symbol,
+            "interval": tf,
+            "startTime": window.start_ms,
+            "endTime": window.end_ms_inclusive,
+            "limit": limit,
+        }
+        candle_url = f"{base_url}{candle_endpoint}?{urlencode(candle_params)}"
+        candle_status, candle_response = _http_get(candle_url, candle_headers)
+        if not (200 <= candle_status < 300):
+            raise ToobitClientError(f"Toobit klines({tf}) failed with HTTP {candle_status}")
+        if not _rows(candle_response):
+            raise ToobitClientError(f"Toobit klines({tf}) returned no candles for {trading_date.isoformat()} KST")
+        candles_by_interval[tf] = {"endpoint": candle_endpoint, "status": candle_status, "ok": True, "interval": tf, "response": candle_response}
+        if tf == fetch_intervals[0]:
+            primary_candle_status, primary_candle_response = candle_status, candle_response
 
     payload = {
         "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
@@ -181,13 +194,16 @@ def fetch_toobit_daily_snapshot(
             "successful_endpoint": trade_endpoint,
             "attempts": [{"endpoint": trade_endpoint, "status": trade_status, "ok": True, "response": trade_response}],
         },
+        # 하위 호환: candles_raw는 첫 번째(primary) 타임프레임
         "candles_raw": {
             "endpoint": candle_endpoint,
-            "status": candle_status,
+            "status": primary_candle_status,
             "ok": True,
-            "interval": interval,
-            "response": candle_response,
+            "interval": fetch_intervals[0],
+            "response": primary_candle_response,
         },
+        # 멀티 타임프레임 데이터
+        "candles_by_interval": candles_by_interval,
     }
     output_path.parent.mkdir(parents=True, exist_ok=False)
     output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")

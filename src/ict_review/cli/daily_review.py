@@ -10,7 +10,7 @@ from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
 from ict_review.cli.review_offline import _json_default
-from ict_review.features.asof import Candle, split_candles_asof
+from ict_review.features.asof import Candle, split_candles_asof, split_timeframes_asof
 from ict_review.ingestion.manifest import (
     RunStatus,
     add_outputs,
@@ -291,21 +291,35 @@ def _run_dir(data_root: Path, run_id: str) -> Path:
     return data_root / "runs" / run_id
 
 
-def _load_fills_and_candles(trading_date: date, fixture: Path | None, *, data_root: Path, run_id: str) -> tuple[Path, tuple[Fill, ...], list[Candle], datetime]:
+def _group_candles_by_timeframe(candles: list[Candle]) -> dict[str, list[Candle]]:
+    result: dict[str, list[Candle]] = {}
+    for c in candles:
+        result.setdefault(c.timeframe, []).append(c)
+    return result
+
+
+def _load_fills_and_candles(
+    trading_date: date,
+    fixture: Path | None,
+    *,
+    data_root: Path,
+    run_id: str,
+    intervals: list[str] | None = None,
+) -> tuple[Path, tuple[Fill, ...], dict[str, list[Candle]], datetime]:
     if fixture is not None:
         payload = _read_json(fixture)
         fills = normalize_fills(payload["fills"])
         event_time = _parse_time(str(payload.get("event_time") or min(fill.filled_at for fill in fills).isoformat()))
         candles = [_parse_candle(row) for row in payload.get("candles", [])]
-        return fixture, tuple(fill for fill in fills if _fill_trading_date_kst(fill) == trading_date), candles, event_time
+        return fixture, tuple(fill for fill in fills if _fill_trading_date_kst(fill) == trading_date), _group_candles_by_timeframe(candles), event_time
 
     fixture_path = PROJECT_ROOT / "data" / "daily-fixtures" / f"{trading_date.isoformat()}.json"
     if fixture_path.exists():
-        return _load_fills_and_candles(trading_date, fixture_path, data_root=data_root, run_id=run_id)
+        return _load_fills_and_candles(trading_date, fixture_path, data_root=data_root, run_id=run_id, intervals=intervals)
 
     raw_path = data_root / "raw" / "toobit" / trading_date.isoformat() / run_id / "toobit_daily_snapshot.json"
     try:
-        fetch_toobit_daily_snapshot(trading_date, output_path=raw_path, project_root=PROJECT_ROOT)
+        fetch_toobit_daily_snapshot(trading_date, output_path=raw_path, project_root=PROJECT_ROOT, intervals=intervals)
     except ToobitClientError as exc:
         raise DailyReviewError(str(exc)) from exc
     snapshot = _read_json(raw_path)
@@ -313,12 +327,24 @@ def _load_fills_and_candles(trading_date: date, fixture: Path | None, *, data_ro
     fills = tuple(fill for fill in adapted.fills if _fill_trading_date_kst(fill) == trading_date)
     if not fills:
         raise DailyReviewError(f"Toobit snapshot has no fills for {trading_date.isoformat()} KST")
-    timeframe = str(snapshot.get("candles_raw", {}).get("interval", "5m"))
-    candles = [_parse_toobit_candle(row, timeframe) for row in _extract_response_rows(snapshot["candles_raw"]["response"])]
-    if not candles:
+
+    # 멀티 타임프레임 지원: candles_by_interval 우선, 없으면 candles_raw 하위 호환
+    candles_by_tf: dict[str, list[Candle]] = {}
+    if "candles_by_interval" in snapshot:
+        for tf, tf_data in snapshot["candles_by_interval"].items():
+            rows = [_parse_toobit_candle(row, tf) for row in _extract_response_rows(tf_data["response"])]
+            if rows:
+                candles_by_tf[tf] = rows
+    if not candles_by_tf and "candles_raw" in snapshot:
+        tf = str(snapshot["candles_raw"].get("interval", "5m"))
+        rows = [_parse_toobit_candle(row, tf) for row in _extract_response_rows(snapshot["candles_raw"]["response"])]
+        if rows:
+            candles_by_tf[tf] = rows
+
+    if not candles_by_tf:
         raise DailyReviewError(f"Toobit snapshot has no candles for {trading_date.isoformat()}")
     event_time = min((fill.filled_at for fill in fills), default=datetime.combine(trading_date, time.min, tzinfo=timezone.utc))
-    return raw_path, fills, candles, event_time
+    return raw_path, fills, candles_by_tf, event_time
 
 
 def _evidence_for(episodes: tuple[Any, ...], features: dict[str, Any]) -> dict[str, Any]:
@@ -426,13 +452,23 @@ def list_patterns(*, pattern_memory_path: Path | None = None) -> dict[str, Any]:
     }
 
 
-def prepare(trading_date: date | str, *, data_root: Path = DEFAULT_DATA_ROOT, fixture: Path | None = None, run_id: str | None = None, pattern_memory_path: Path | None = None) -> Path:
+def prepare(
+    trading_date: date | str,
+    *,
+    data_root: Path = DEFAULT_DATA_ROOT,
+    fixture: Path | None = None,
+    run_id: str | None = None,
+    pattern_memory_path: Path | None = None,
+    intervals: list[str] | None = None,
+) -> Path:
     trading_date = _coerce_date(trading_date)
     if _has_published_run(data_root, trading_date):
         raise DailyReviewError(f"PUBLISHED run already exists for {trading_date.isoformat()}")
 
     actual_run_id = run_id or generate_run_id()
-    input_path, fills, candles, event_time = _load_fills_and_candles(trading_date, fixture, data_root=data_root, run_id=actual_run_id)
+    input_path, fills, candles_by_tf, event_time = _load_fills_and_candles(
+        trading_date, fixture, data_root=data_root, run_id=actual_run_id, intervals=intervals
+    )
     manifest = create_manifest(actual_run_id, [build_input_file(input_path, "daily_trade_source", time_range_start=trading_date.isoformat(), time_range_end=trading_date.isoformat())])
     manifest_path = write_manifest(manifest, data_root)
     run_dir = manifest_path.parent
@@ -447,12 +483,27 @@ def prepare(trading_date: date | str, *, data_root: Path = DEFAULT_DATA_ROOT, fi
         manifest = add_outputs(manifest, [build_output_file(run_dir / "episodes.json", "trade_episodes")], RunStatus.RECONCILED)
         rewrite_manifest(manifest_path, manifest)
 
-        split = split_candles_asof(candles, event_time) if candles else None
+        splits = split_timeframes_asof(candles_by_tf, event_time) if candles_by_tf else {}
+        primary_tf = next(iter(splits), None)
+        primary_split = splits[primary_tf] if primary_tf else None
+
+        # 타임프레임별 features
+        tf_features: dict[str, dict] = {}
+        for tf, sp in splits.items():
+            tf_features[tf] = {
+                "pre_trade_close_count": len(sp.pre_trade),
+                "post_trade_close_count": len(sp.post_trade),
+                "pre_trade_last_close": str(sp.pre_trade[-1].close) if sp.pre_trade else None,
+            }
+
         features = {
             "date": trading_date.isoformat(),
             "event_time": event_time.isoformat(),
-            "pre_trade_close_count": 0 if split is None else len(split.pre_trade),
-            "post_trade_close_count": 0 if split is None else len(split.post_trade),
+            # 하위 호환: primary 타임프레임 값
+            "pre_trade_close_count": 0 if primary_split is None else len(primary_split.pre_trade),
+            "post_trade_close_count": 0 if primary_split is None else len(primary_split.post_trade),
+            # 멀티 타임프레임 데이터
+            "timeframes": tf_features,
         }
         _write_json(run_dir / "features.json", features)
         manifest = add_outputs(manifest, [build_output_file(run_dir / "features.json", "event_time_features")], RunStatus.FEATURED)
@@ -574,6 +625,11 @@ def main(argv: list[str] | None = None) -> int:
     prepare_parser = sub.add_parser("prepare")
     prepare_parser.add_argument("--date", required=True)
     prepare_parser.add_argument("--fixture")
+    prepare_parser.add_argument(
+        "--intervals",
+        default="5m",
+        help="쉼표로 구분된 캔들 타임프레임 (예: 5m,15m,1h,4h). 기본값: 5m",
+    )
 
     finalize_parser = sub.add_parser("finalize")
     finalize_parser.add_argument("--run-id", required=True)
@@ -603,7 +659,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     data_root = Path(args.data_root)
     if args.command == "prepare":
-        print(prepare(_parse_date(args.date), data_root=data_root, fixture=None if args.fixture is None else Path(args.fixture)))
+        parsed_intervals = [tf.strip() for tf in args.intervals.split(",") if tf.strip()]
+        print(prepare(
+            _parse_date(args.date),
+            data_root=data_root,
+            fixture=None if args.fixture is None else Path(args.fixture),
+            intervals=parsed_intervals if parsed_intervals != ["5m"] else None,
+        ))
     elif args.command == "finalize":
         print(finalize(args.run_id, Path(args.review_json), data_root=data_root))
     elif args.command == "status":
